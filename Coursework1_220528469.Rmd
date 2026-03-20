@@ -1,0 +1,190 @@
+---
+title: "<b>Time Series Analysis on ENSO Using Prophet's Forecasting Framework</b>"
+author: "Kaiser Hussain"
+date: "2026-03-18"
+output:
+  html_document:
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# <u>Prologue</u>
+## For this coursework, I aim to explore a time series object, ENSO, with the help of the Prophet forecasting framework provided by Meta. Firstly, we must ask ourselves the following: Why should we even care about time series? And what on Earth are we even trying to do? Let's use the '?' prefix to gain an insight into the ENSO time series. 
+
+```{r, warning=FALSE, message=FALSE}
+# install.packages("astsa")
+# install.packages("prophet")
+library(astsa)
+library(prophet)
+
+# ?ENSO
+# The El Nino - Southern Oscillation Index provides data on the temperature changes of waters in regions of the Pacific Ocean.
+# Let's use R's built-in functions to gain insight on ENSO.
+plot1 = plot(ENSO, main = "ENSO", ylab = "Temperature Change"); plot1
+```
+
+# <u>Chapter 1: Decomposing the Time Series</u>
+## Remember when I wanted you to ask yourself why we should even concern ourselves about time series? Well a time series deals with data in a unique way. Time series are essentially some sort of combination of three different parameters - trend, seasonality and irregular noise. This makes it exceptionally easy to forecast and you will see that Prophet will make this task even easier! R can allow us to view these parameters directly.
+
+```{r, results='hide'}
+decomp <- decompose(ENSO)
+decomp$x # returns the raw time series data
+
+# We can view the three aforementioned components.
+
+decomp$trend # trend
+decomp$seasonal # seasonality
+decomp$random # noise
+```
+
+```{r}
+
+# We can also gain insight the following: 
+
+decomp$type # nature of the object - are the three aforementioned parameters linked in an additive model or a multiplicative model?
+
+decomp$figure # tells us the average seasonal effect for each increment in the cycle. In this case, we have a vector of twelve elements, which makes sense because there are twelve months in a year.
+```
+
+# <u>Chapter 2: Linear Regression</u>
+
+```{r}
+lm(ENSO ~ time(ENSO)) # R uses least squares regression to estimate a line of best fit.
+cf <- coef(lm(ENSO ~ time(ENSO))) # creates a vector of the coefficients of the line of best fit.
+
+invisible(plot(ENSO, main = "ENSO", ylab = "Temperature Change") + abline(a = cf[1], b = cf[2], lwd = 2, col = "red"))
+```
+
+## From this plot, we can see that the change in temperature is pretty much constant from 1951 to 2022. This means that we can make the following inference: the temperature of the waters in the central and eastern tropical Pacific Ocean have stayed the same since 1951.
+
+# <u>Chapter 3: Forecasting with Prophet</u>
+## We can now finally start working with Prophet!
+
+```{r, echo=FALSE, results='hide'}
+ ?prophet
+```
+## We must first convert our time series into a data frame. 
+## This data frame needs to have two columns for Prophet to recognise it: ds (the dates) and y (the respective data values). We will need to run the library zoo. 
+
+```{r, warning=FALSE, message=FALSE}
+library(zoo) # for the yearmon() function
+```
+```{r, results='hide'}
+df <- data.frame(ds = as.Date(as.yearmon(time(ENSO))), y = as.numeric(ENSO))
+df # I'm checking to see if the dates line up, because when running '?ENSO', the description did not explicitly state that the data values were taken on a daily basis
+```
+```{r}
+head(df) # shows us the first six rows of the data frame
+```
+```{r, results='hide'}
+p_df = prophet(df)
+
+# Let's create future dates for forecasting.
+NextYear = make_future_dataframe(p_df, 1825); NextYear
+```
+```{r,results='hide'}
+# Now we can use Prophet's predict function!
+pdfForecast = predict(p_df, NextYear); pdfForecast
+```
+```{r}
+# To check our results at each step:
+head(pdfForecast)
+tail(pdfForecast)
+summary(pdfForecast$yhat) # to check min, max, mean, variance
+str(pdfForecast)
+```
+# <u> Chapter 4: Plotting the forecast using ggplot2</u>
+## We can now plot this; it should be noted that historical data and predictions should clearly be distinguished by some sort of visual difference. In this case, I will put a separation line.
+
+```{r ENSO-forecast-plot, warning=FALSE}
+library(ggplot2) # useful tool for complex plots
+
+# Ensure dates are correctly formatted
+df$ds <- as.Date(df$ds)
+pdfForecast$ds <- as.Date(pdfForecast$ds)
+
+# Group the predicted data together using a Boolean
+future_only <- pdfForecast[pdfForecast$ds > max(df$ds), ]
+
+# Craft the plot from the ground up
+ggplot() +
+  # Historical ENSO data
+  geom_line(data = df, aes(x = ds, y = y), color = "black") + # using aes to make the plot visually appealing
+  
+  # Full forecast (fitted + predicted)
+  geom_line(data = pdfForecast, aes(x = ds, y = yhat), color = "blue") +
+  
+  # Confidence intervals for full forecast
+  geom_ribbon(data = pdfForecast, aes(x = ds, ymin = yhat_lower, ymax = yhat_upper),
+              alpha = 0.2, fill = "blue") +
+  
+  # Future-only forecast emphasised
+  geom_line(data = future_only, aes(x = ds, y = yhat), color = "green", size = 1) +
+  
+  # Vertical line separating historical vs forecast
+  geom_vline(xintercept = max(df$ds), linetype = "dashed", color = "red") +
+  
+  # Labels & theme
+  labs(title = "ENSO Index: Historical & Short-Term Forecast (5 Years)",
+       subtitle = "Black = historical | Blue = fitted+forecast | Green = future-only",
+       x = "Date",
+       y = "ENSO") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14))
+```
+
+
+# Chapter 5: Considering different time-frames
+## Instead of considering the next five years, we could consider the next twenty.
+
+```{r}
+Next20 = make_future_dataframe(p_df, 7300)
+pdf20 = predict(p_df, Next20)
+
+# Let's get a general idea of pdf20
+head(pdf20)
+tail(pdf20)
+```
+
+```{r ENSO-forecast-plot2, warning=FALSE}
+library(ggplot2) # useful tool for complex plots
+
+# Ensure dates are correctly formatted
+df$ds <- as.Date(df$ds)
+pdf20$ds <- as.Date(pdf20$ds)
+
+# Group the predicted data together using a Boolean
+future_only2 <- pdf20[pdf20$ds > max(df$ds), ]
+
+# Craft the plot from the ground up
+ggplot() +
+  # Historical ENSO data
+  geom_line(data = df, aes(x = ds, y = y), color = "black") + # using aes to make the plot visually appealing
+  
+  # Full forecast (fitted + predicted)
+  geom_line(data = pdf20, aes(x = ds, y = yhat), color = "blue") +
+  
+  # Confidence intervals for full forecast
+  geom_ribbon(data = pdf20, aes(x = ds, ymin = yhat_lower, ymax = yhat_upper),
+              alpha = 0.2, fill = "blue") +
+  
+  # Future-only forecast emphasised
+  geom_line(data = future_only2, aes(x = ds, y = yhat), color = "green", size = 1) +
+  
+  # Vertical line separating historical vs forecast
+  geom_vline(xintercept = max(df$ds), linetype = "dashed", color = "red") +
+  
+  # Labels & theme
+  labs(title = "ENSO Index: Historical & Long-Term Forecast (20 Years)",
+       subtitle = "Black = historical | Blue = fitted+forecast | Green = future-only",
+       x = "Date",
+       y = "ENSO") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14))
+```
+
+# <u>Epilogue</u>
+## It appears that the overall trend of the temperature series is stationary. There is a slight upward trend but for almost seven decades of opportunity, it isn't enough to be recognised. The ENSO daily index shows very intense seasonal oscillations around a mean which has been stable for 71 years. Prophet used this stable mean and seasonal oscillation exhibition to forecast values in the next five years which mimic the historical seasonality around this mean. The confidence interval (highlighted region on the plot) provides a level of variability which is expected. To conclude, the time series analysis has shown that most of the variation in ENSO's index is influenced by predictable yearly fluctuations rather than a long-term incline/decline. The forecast has provided a reliable extension of these patterns to serve in the interests of analysts.
